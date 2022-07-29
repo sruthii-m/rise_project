@@ -137,4 +137,6 @@ correlation_measure = ConnectivityMeasure(kind='correlation')
 full_correlation_matrix = correlation_measure.fit_transform([cleaned_and_averaged_time_series])
 full_correlation_matrix.shape
 
+#return connectivity (one less than actual brodmann area)
+full_correlation_matrix[0, 43, 22]
 
