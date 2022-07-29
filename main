@@ -1,3 +1,4 @@
+#code adapted from https://carpentries-incubator.github.io/SDC-BIDS-fMRI/aio/index.html
 
 from nilearn import image as nimg
 from nilearn import plotting as nplot
