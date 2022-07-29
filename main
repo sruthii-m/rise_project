@@ -138,5 +138,7 @@ full_correlation_matrix = correlation_measure.fit_transform([cleaned_and_average
 full_correlation_matrix.shape
 
 #return connectivity (one less than actual brodmann area)
+#44 is broca's, 23 is wernicke's, 38 is medial temporal area
 full_correlation_matrix[0, 43, 22]
+full_correlation_matrix[0, 43, 38]
 
