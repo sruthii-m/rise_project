@@ -1,1 +1,139 @@
 
+from nilearn import image as nimg
+from nilearn import plotting as nplot
+import numpy as np
+import pandas as pd
+from bids import BIDSLayout
+from nilearn.connectome import ConnectivityMeasure
+
+layout = BIDSLayout(#data_name,
+                   config=['bids','derivatives'])
+
+#Get resting state data (preprocessed, mask, and confounds file)
+func_files = layout.get(subject=sub,
+                        datatype='func', task='rest',
+                        desc='preproc',
+                        space='MNI152NLin2009cAsym',
+                        extension='nii.gz',
+                        return_type='file')
+
+mask_files = layout.get(subject=sub,
+                        datatype='func', task='rest',
+                        desc='brain',
+                        suffix="mask",
+                        space='MNI152NLin2009cAsym',
+                        extension='nii.gz',
+                        return_type='file')
+
+confound_files = layout.get(subject=sub,
+                            datatype='func',
+                            task='rest',
+                            desc='confounds',
+                            extension='tsv',
+                            return_type='file')
+
+#Load separated parcellation
+parcel_file = '../resources/rois/yeo_2011/Yeo_JNeurophysiol11_MNI152/relabeled_yeo_atlas.nii.gz'
+yeo_7 = nimg.load_img(parcel_file)
+
+
+from nilearn import input_data
+
+
+masker = input_data.NiftiLabelsMasker(labels_img=yeo_7,
+                                      standardize=True,
+                                      memory='nilearn_cache',
+                                      verbose=1,
+                                      detrend=True,
+                                     low_pass = 0.08,
+                                     high_pass = 0.009,
+                                     t_r=2)
+
+# Pull the first subject's data
+func_file = func_files[0]
+mask_file = mask_files[0]
+confound_file = confound_files[0]
+
+
+#Refer to part_06 for code + explanation
+def extract_confounds(confound_tsv,confounds,dt=True):
+    '''
+    Arguments:
+        confound_tsv                    Full path to confounds.tsv
+        confounds                       A list of confounder variables to extract
+        dt                              Compute temporal derivatives [default = True]
+        
+    Outputs:
+        confound_mat                    
+    '''
+    
+    if dt:    
+        dt_names = ['{}_derivative1'.format(c) for c in confounds]
+        confounds = confounds + dt_names
+    
+    #Load in data using Pandas then extract relevant columns
+    confound_df = pd.read_csv(confound_tsv,delimiter='\t') 
+    confound_df = confound_df[confounds]
+    
+ 
+    #Convert into a matrix of values (timepoints)x(variable)
+    confound_mat = confound_df.values 
+    
+    #Return confound matrix
+    return confound_mat
+
+
+#Load functional image
+tr_drop = 4
+func_img = nimg.load_img(func_file)
+
+#Remove the first 4 TRs
+func_img = func_img.slicer[:,:,:,tr_drop:]
+
+#Use the above function to pull out a confound matrix
+confounds = extract_confounds(confound_file,
+                              ['trans_x','trans_y','trans_z',
+                               'rot_x','rot_y','rot_z',
+                               'global_signal',
+                               'white_matter','csf'])
+#Drop the first 4 rows of the confounds matrix
+confounds = confounds[tr_drop:,:] 
+
+#Apply cleaning, parcellation and extraction to functional data
+cleaned_and_averaged_time_series = masker.fit_transform(func_img,confounds)
+cleaned_and_averaged_time_series.shape
+
+#Get the label numbers from the atlas
+atlas_labels = np.unique(yeo_7.get_fdata().astype(int))
+
+# Get number of labels that we have
+NUM_LABELS = len(atlas_labels)
+
+# Remember fMRI images are of size (x,y,z,t)
+# where t is the number of timepoints
+num_timepoints = func_img.shape[3]
+
+# Create an array of zeros that has the correct size
+final_signal = np.zeros((num_timepoints, NUM_LABELS))
+
+# Get regions that are kept
+regions_kept = np.array(masker.labels_)
+
+# Fill columns matching labels with signal values
+final_signal[:, regions_kept] = cleaned_and_averaged_time_series
+
+valid_regions_signal = final_signal[:, regions_kept]
+
+np.array_equal(
+    valid_regions_signal,
+    cleaned_and_averaged_time_series
+)
+
+
+
+#func connectivity
+correlation_measure = ConnectivityMeasure(kind='correlation')
+full_correlation_matrix = correlation_measure.fit_transform([cleaned_and_averaged_time_series])
+full_correlation_matrix.shape
+
+
