@@ -1,1 +1,419 @@
+# receieve data in beta-weighted images or z-scores of functional connectivity
+# if data comes in form of images, calculate functional connectivity
 
+#code adapted from https://carpentries-incubator.github.io/SDC-BIDS-fMRI/aio/index.html
+
+for i in range (1,len[dataset]):
+from nilearn import image as nimg
+from nilearn import plotting as nplot
+import numpy as np
+import pandas as pd
+from bids import BIDSLayout
+from nilearn.connectome import ConnectivityMeasure
+
+layout = BIDSLayout(#data_name,
+                   config=['bids','derivatives'])
+
+#Get resting state data (preprocessed, mask, and confounds file)
+func_files = layout.get(subject=sub,
+                        datatype='func', task='rest',
+                        desc='preproc',
+                        space='MNI152NLin2009cAsym',
+                        extension='nii.gz',
+                        return_type='file')
+
+mask_files = layout.get(subject=sub,
+                        datatype='func', task='rest',
+                        desc='brain',
+                        suffix="mask",
+                        space='MNI152NLin2009cAsym',
+                        extension='nii.gz',
+                        return_type='file')
+
+confound_files = layout.get(subject=sub,
+                            datatype='func',
+                            task='rest',
+                            desc='confounds',
+                            extension='tsv',
+                            return_type='file')
+
+#Load separated parcellation
+parcel_file = '../resources/rois/yeo_2011/Yeo_JNeurophysiol11_MNI152/relabeled_yeo_atlas.nii.gz'
+yeo_7 = nimg.load_img(parcel_file)
+
+
+from nilearn import input_data
+
+
+masker = input_data.NiftiLabelsMasker(labels_img=yeo_7,
+                                      standardize=True,
+                                      memory='nilearn_cache',
+                                      verbose=1,
+                                      detrend=True,
+                                     low_pass = 0.08,
+                                     high_pass = 0.009,
+                                     t_r=2)
+
+# Pull the first subject's data
+func_file = func_files[0]
+mask_file = mask_files[0]
+confound_file = confound_files[0]
+
+
+#Refer to part_06 for code + explanation
+def extract_confounds(confound_tsv,confounds,dt=True):
+    '''
+    Arguments:
+        confound_tsv                    Full path to confounds.tsv
+        confounds                       A list of confounder variables to extract
+        dt                              Compute temporal derivatives [default = True]
+        
+    Outputs:
+        confound_mat                    
+    '''
+    
+    if dt:    
+        dt_names = ['{}_derivative1'.format(c) for c in confounds]
+        confounds = confounds + dt_names
+    
+    #Load in data using Pandas then extract relevant columns
+    confound_df = pd.read_csv(confound_tsv,delimiter='\t') 
+    confound_df = confound_df[confounds]
+    
+ 
+    #Convert into a matrix of values (timepoints)x(variable)
+    confound_mat = confound_df.values 
+    
+    #Return confound matrix
+    return confound_mat
+
+
+#Load functional image
+tr_drop = 4
+func_img = nimg.load_img(func_file)
+
+#Remove the first 4 TRs
+func_img = func_img.slicer[:,:,:,tr_drop:]
+
+#Use the above function to pull out a confound matrix
+confounds = extract_confounds(confound_file,
+                              ['trans_x','trans_y','trans_z',
+                               'rot_x','rot_y','rot_z',
+                               'global_signal',
+                               'white_matter','csf'])
+#Drop the first 4 rows of the confounds matrix
+confounds = confounds[tr_drop:,:] 
+
+#Apply cleaning, parcellation and extraction to functional data
+cleaned_and_averaged_time_series = masker.fit_transform(func_img,confounds)
+cleaned_and_averaged_time_series.shape
+
+#Get the label numbers from the atlas
+atlas_labels = np.unique(yeo_7.get_fdata().astype(int))
+
+# Get number of labels that we have
+NUM_LABELS = len(atlas_labels)
+
+# Remember fMRI images are of size (x,y,z,t)
+# where t is the number of timepoints
+num_timepoints = func_img.shape[3]
+
+# Create an array of zeros that has the correct size
+final_signal = np.zeros((num_timepoints, NUM_LABELS))
+
+# Get regions that are kept
+regions_kept = np.array(masker.labels_)
+
+# Fill columns matching labels with signal values
+final_signal[:, regions_kept] = cleaned_and_averaged_time_series
+
+valid_regions_signal = final_signal[:, regions_kept]
+
+np.array_equal(
+    valid_regions_signal,
+    cleaned_and_averaged_time_series
+)
+
+
+
+#func connectivity
+correlation_measure = ConnectivityMeasure(kind='correlation')
+full_correlation_matrix = correlation_measure.fit_transform([cleaned_and_averaged_time_series])
+full_correlation_matrix.shape
+
+#return connectivity (one less than actual brodmann area)
+#44 is broca's, 23 is wernicke's, 38 is medial temporal area
+full_correlation_matrix[0, 43, 22]
+full_correlation_matrix[0, 43, 38]
+
+#once z-scores are calculated/given
+#use adaboost to determine the weight of each connection
+#wernicke + broca connection, medial temporal + broca connection
+
+#model code from machine learning mastery https://machinelearningmastery.com/adaboost-ensemble-in-python/
+# check scikit-learn version
+import sklearn
+print(sklearn.__version__)
+
+# test classification dataset
+from sklearn.datasets import make_classification
+# define dataset
+X, y = make_classification(n_samples=1000, n_features=20, n_informative=15, n_redundant=5, random_state=6)
+# summarize the dataset
+print(X.shape, y.shape)
+(1000, 20) (1000,)
+
+# evaluate adaboost algorithm for classification
+from numpy import mean
+from numpy import std
+from sklearn.datasets import make_classification
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.ensemble import AdaBoostClassifier
+# define dataset
+X, y = make_classification(n_samples=1000, n_features=20, n_informative=15, n_redundant=5, random_state=6)
+# define the model
+model = AdaBoostClassifier()
+# evaluate the model
+cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+n_scores = cross_val_score(model, X, y, scoring='accuracy', cv=cv, n_jobs=-1, error_score='raise')
+# report performance
+print('Accuracy: %.3f (%.3f)' % (mean(n_scores), std(n_scores)))
+
+# make predictions using adaboost for classification
+from sklearn.datasets import make_classification
+from sklearn.ensemble import AdaBoostClassifier
+# define dataset
+X, y = make_classification(n_samples=1000, n_features=20, n_informative=15, n_redundant=5, random_state=6)
+# define the model
+model = AdaBoostClassifier()
+# fit the model on the whole dataset
+model.fit(X, y)
+# make a single prediction
+row = [[-3.47224758,1.95378146,0.04875169,-0.91592588,-3.54022468,1.96405547,-7.72564954,-2.64787168,-1.81726906,-1.67104974,2.33762043,-4.30273117,0.4839841,-1.28253034,-10.6704077,-0.7641103,-3.58493721,2.07283886,0.08385173,0.91461126]]
+yhat = model.predict(row)
+print('Predicted Class: %d' % yhat[0])
+
+
+# test regression dataset
+from sklearn.datasets import make_regression
+# define dataset
+X, y = make_regression(n_samples=1000, n_features=20, n_informative=15, noise=0.1, random_state=6)
+# summarize the dataset
+print(X.shape, y.shape)
+
+# evaluate adaboost ensemble for regression
+from numpy import mean
+from numpy import std
+from sklearn.datasets import make_regression
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import RepeatedKFold
+from sklearn.ensemble import AdaBoostRegressor
+# define dataset
+X, y = make_regression(n_samples=1000, n_features=20, n_informative=15, noise=0.1, random_state=6)
+# define the model
+model = AdaBoostRegressor()
+# evaluate the model
+cv = RepeatedKFold(n_splits=10, n_repeats=3, random_state=1)
+n_scores = cross_val_score(model, X, y, scoring='neg_mean_absolute_error', cv=cv, n_jobs=-1, error_score='raise')
+# report performance
+print('MAE: %.3f (%.3f)' % (mean(n_scores), std(n_scores)))
+
+
+# adaboost ensemble for making predictions for regression
+from sklearn.datasets import make_regression
+from sklearn.ensemble import AdaBoostRegressor
+# define dataset
+X, y = make_regression(n_samples=1000, n_features=20, n_informative=15, noise=0.1, random_state=6)
+# define the model
+model = AdaBoostRegressor()
+# fit the model on the whole dataset
+model.fit(X, y)
+# make a single prediction
+row = [[1.20871625,0.88440466,-0.9030013,-0.22687731,-0.82940077,-1.14410988,1.26554256,-0.2842871,1.43929072,0.74250241,0.34035501,0.45363034,0.1778756,-1.75252881,-1.33337384,-1.50337215,-0.45099008,0.46160133,0.58385557,-1.79936198]]
+yhat = model.predict(row)
+print('Prediction: %d' % yhat[0])
+
+from numpy import mean
+from numpy import std
+from sklearn.datasets import make_classification
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.ensemble import AdaBoostClassifier
+from matplotlib import pyplot
+ 
+# get the dataset
+def get_dataset():
+	X, y = make_classification(n_samples=1000, n_features=20, n_informative=15, n_redundant=5, random_state=6)
+	return X, y
+ 
+# get a list of models to evaluate
+def get_models():
+	models = dict()
+	# define number of trees to consider
+	n_trees = [10, 50, 100, 500, 1000, 5000]
+	for n in n_trees:
+		models[str(n)] = AdaBoostClassifier(n_estimators=n)
+	return models
+ 
+# evaluate a given model using cross-validation
+def evaluate_model(model, X, y):
+	# define the evaluation procedure
+	cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+	# evaluate the model and collect the results
+	scores = cross_val_score(model, X, y, scoring='accuracy', cv=cv, n_jobs=-1)
+	return scores
+ 
+# define dataset
+X, y = get_dataset()
+# get the models to evaluate
+models = get_models()
+# evaluate the models and store results
+results, names = list(), list()
+for name, model in models.items():
+	# evaluate the model
+	scores = evaluate_model(model, X, y)
+	# store the results
+	results.append(scores)
+	names.append(name)
+	# summarize the performance along the way
+	print('>%s %.3f (%.3f)' % (name, mean(scores), std(scores)))
+# plot model performance for comparison
+pyplot.boxplot(results, labels=names, showmeans=True)
+pyplot.show()
+
+
+# explore adaboost ensemble tree depth effect on performance
+from numpy import mean
+from numpy import std
+from sklearn.datasets import make_classification
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.tree import DecisionTreeClassifier
+from matplotlib import pyplot
+ 
+# get the dataset
+def get_dataset():
+	X, y = make_classification(n_samples=1000, n_features=20, n_informative=15, n_redundant=5, random_state=6)
+	return X, y
+ 
+# get a list of models to evaluate
+def get_models():
+	models = dict()
+	# explore depths from 1 to 10
+	for i in range(1,11):
+		# define base model
+		base = DecisionTreeClassifier(max_depth=i)
+		# define ensemble model
+		models[str(i)] = AdaBoostClassifier(base_estimator=base)
+	return models
+ 
+# evaluate a given model using cross-validation
+def evaluate_model(model, X, y):
+	# define the evaluation procedure
+	cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+	# evaluate the model and collect the results
+	scores = cross_val_score(model, X, y, scoring='accuracy', cv=cv, n_jobs=-1)
+	return scores
+ 
+# define dataset
+X, y = get_dataset()
+# get the models to evaluate
+models = get_models()
+# evaluate the models and store results
+results, names = list(), list()
+for name, model in models.items():
+	# evaluate the model
+	scores = evaluate_model(model, X, y)
+	# store the results
+	results.append(scores)
+	names.append(name)
+	# summarize the performance along the way
+	print('>%s %.3f (%.3f)' % (name, mean(scores), std(scores)))
+# plot model performance for comparison
+pyplot.boxplot(results, labels=names, showmeans=True)
+pyplot.show()
+
+
+# explore adaboost ensemble learning rate effect on performance
+from numpy import mean
+from numpy import std
+from numpy import arange
+from sklearn.datasets import make_classification
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.ensemble import AdaBoostClassifier
+from matplotlib import pyplot
+ 
+# get the dataset
+def get_dataset():
+	X, y = make_classification(n_samples=1000, n_features=20, n_informative=15, n_redundant=5, random_state=6)
+	return X, y
+ 
+# get a list of models to evaluate
+def get_models():
+	models = dict()
+	# explore learning rates from 0.1 to 2 in 0.1 increments
+	for i in arange(0.1, 2.1, 0.1):
+		key = '%.3f' % i
+		models[key] = AdaBoostClassifier(learning_rate=i)
+	return models
+ 
+# evaluate a given model using cross-validation
+def evaluate_model(model, X, y):
+	# define the evaluation procedure
+	cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+	# evaluate the model and collect the results
+	scores = cross_val_score(model, X, y, scoring='accuracy', cv=cv, n_jobs=-1)
+	return scores
+ 
+# define dataset
+X, y = get_dataset()
+# get the models to evaluate
+models = get_models()
+# evaluate the models and store results
+results, names = list(), list()
+for name, model in models.items():
+	# evaluate the model
+	scores = evaluate_model(model, X, y)
+	# store the results
+	results.append(scores)
+	names.append(name)
+	# summarize the performance along the way
+	print('>%s %.3f (%.3f)' % (name, mean(scores), std(scores)))
+# plot model performance for comparison
+pyplot.boxplot(results, labels=names, showmeans=True)
+pyplot.xticks(rotation=45)
+pyplot.show()
+
+#calculate with logistic regression model based on how data appears, if so:
+
+from numpy import mean
+from numpy import std
+from sklearn.datasets import make_classification
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.linear_model import LogisticRegression
+# define dataset
+X, y = make_classification(n_samples=1000, n_features=20, n_informative=15, n_redundant=5, random_state=6)
+# define the model
+model = AdaBoostClassifier(base_estimator=LogisticRegression())
+# evaluate the model
+cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+n_scores = cross_val_score(model, X, y, scoring='accuracy', cv=cv, n_jobs=-1, error_score='raise')
+# report performance
+print('Accuracy: %.3f (%.3f)' % (mean(n_scores), std(n_scores)))
+
+#if necessary, adjust classification accuracy
+#feed data into model, z-scores are in range (-3,3) and weights on range of (0,1)
+#data going into model is four-dimensional--> max should be 12
+#error term randomly generated on a scale (-1 to 1)
+#on a scale of -4 to 4
+#set a threshold to determine classification into positive or negative test result
+#until determined, threshold=0
+#if greater than threshold:
+  #print("positive")
+#else:
+  #print("negative")
