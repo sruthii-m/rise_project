@@ -1,1 +1,55 @@
+cd('/Users/sruthi/Desktop/matlab/spm12/sub-01/func') % 
 
+    back0_onsetTimes = tdfread(['rp_sub-' subject '_task-letter0backtask_events.tsv'], '\t'); 
+    back0_onsetTimes.trial_type = string(back0_onsetTimes.trial_type); 
+
+    back0 = [];
+
+    for i = 1:length(back0_onsetTimes.onset)
+    %    if strtrim(back0_onsetTimes.trial_type(i,:)) == 'back0_correct'
+%          back0 = [back0; back0_onsetTimes.onset(i,:) back0_onsetTimes.duration(i,:)];
+         back0 = [back0; back0_onsetTimes.onset(i) back0_onsetTimes.duration(i)];
+   %    elseif strtrim(back0_onsetTimes.trial_type(i,:)) == 'back0_incorrect'
+     %       back0 = [back0; back0_onsetTimes.onset(i,:) back0_onsetTimes.duration(i,:)];
+    
+   %  mkdir ('back0')
+   % cd (['back0'])
+    end
+
+   cd ('/Users/sruthi/Desktop/matlab/txt_timings')
+   writematrix(back0,'back0.txt');
+
+  %% 
+  
+   cd('/Users/sruthi/Desktop/matlab/spm12/sub-01/func') % 
+
+    back1_onsetTimes = tdfread(['rp_sub-' subject '_task-letter1backtask_events.tsv'], '\t'); 
+    back1_onsetTimes.trial_type = string(back1_onsetTimes.trial_type); 
+
+    back1 = [];
+
+    for i = 1:length(back1_onsetTimes.onset)
+
+         back1 = [back1; back1_onsetTimes.onset(i) back1_onsetTimes.duration(i)];
+
+    end
+
+   cd ('/Users/sruthi/Desktop/matlab/txt_timings')
+   writematrix(back1,'back1.txt');
+
+   %% 
+   cd('/Users/sruthi/Desktop/matlab/spm12/sub-01/func') % 
+
+    back2_onsetTimes = tdfread(['rp_sub-' subject '_task-letter2backtask_events.tsv'], '\t'); 
+    back2_onsetTimes.trial_type = string(back2_onsetTimes.trial_type); 
+
+    back2 = [];
+
+    for i = 1:length(back2_onsetTimes.onset)
+
+         back2 = [back2; back2_onsetTimes.onset(i) back2_onsetTimes.duration(i)];
+
+    end
+
+   cd ('/Users/sruthi/Desktop/matlab/txt_timings')
+   writematrix(back2,'back2.txt');
