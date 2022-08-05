@@ -1,3 +1,4 @@
+%NOT PREPROCESSING THIS IS TIMING CONVERSION
 cd('/Users/sruthi/Desktop/matlab/spm12/sub-01/func') % 
 
     back0_onsetTimes = tdfread(['rp_sub-' subject '_task-letter0backtask_events.tsv'], '\t'); 
